@@ -147,7 +147,7 @@ jobs:
 
       - name: Build kernel
         run: |
-          cd ./.github/workflows
+          cd ./.github/workflows/scripts
 
           ARGS="--android ${{ github.event.inputs.android_version }}"
           ARGS="$ARGS --kernel ${{ github.event.inputs.kernel_version }}"

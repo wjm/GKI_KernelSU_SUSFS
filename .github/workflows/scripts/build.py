@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def load_build_matrix() -> dict:
     """从 JSON 文件加载构建矩阵"""
-    matrix_file = Path(__file__).parent / "matrix.json"
+    matrix_file = Path(__file__).parent.parent / "config" / "matrix.json"
     
     if matrix_file.exists():
         try:

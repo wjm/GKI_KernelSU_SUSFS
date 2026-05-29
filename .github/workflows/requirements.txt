@@ -1,3 +1,0 @@
-# GKI Kernel Build System Requirements
-
-PyYAML>=6.0

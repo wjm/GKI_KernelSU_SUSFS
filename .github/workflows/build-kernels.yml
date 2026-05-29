@@ -59,46 +59,22 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       build_matrix: ${{ steps.generate.outputs.matrix }}
+      cache_version: ${{ steps.get_cache.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Get latest cache version
+        id: get_cache
+        run: |
+          cd ./.github/workflows/scripts
+          python3 cache_manager.py get-version ${{ github.repository }}
+
       - name: Generate build matrix
         id: generate
         run: |
-          pwd
-          ls -la .github/workflows/
-          python3 << 'PYEOF'
-          import json
-          import os
-
-          matrix_path = '.github/workflows/matrix.json'
-          print("Reading from:", matrix_path)
-          print("Current dir:", os.getcwd())
-          print("File exists:", os.path.exists(matrix_path))
-
-          with open(matrix_path, 'r') as f:
-              matrix = json.load(f)
-
-          builds = []
-          for key, configs in matrix.items():
-              android, kernel = key.split('-')
-              for cfg in configs:
-                  build = {
-                      "android": android,
-                      "kernel": kernel,
-                      "sub_level": cfg["sub_level"],
-                      "os_patch": cfg["os_patch_level"],
-                  }
-                  if "revision" in cfg:
-                      build["revision"] = cfg["revision"]
-                  builds.append(build)
-
-          output = 'matrix=' + json.dumps(builds)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(output + '\n')
-          print("Matrix generated:", len(builds), "builds")
-          PYEOF
+          cd ./.github/workflows/scripts
+          python3 matrix_generator.py
 
   build:
     needs: prepare
@@ -131,28 +107,27 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update && sudo apt upgrade -y
-          sudo apt install -y ccache python3 git curl wget zip unzip
+          sudo apt install -y ccache python3 git curl wget zip unzip xz-utils
           pip install PyYAML
 
       - name: Configure ccache
         run: |
           mkdir -p ~/.cache/bazel
+          mkdir -p ~/.ccache
           ccache --version
           ccache --max-size=2G
           ccache --set-config=compression=true
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
-      - name: Restore ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}-ccache-
+      - name: Download build cache
+        if: needs.prepare.outputs.cache_version != ''
+        run: |
+          cd ./.github/workflows/scripts
+          python3 cache_manager.py download ${{ github.repository }}
 
       - name: Build kernel
         run: |
-          cd ./.github/workflows
+          cd ./.github/workflows/scripts
 
           ARGS="--android ${{ matrix.config.android }}"
           ARGS="$ARGS --kernel ${{ matrix.config.kernel }}"
@@ -171,6 +146,18 @@ jobs:
 
           python3 build.py $ARGS
 
+      - name: Save build cache
+        run: |
+          cd ./.github/workflows/scripts
+          python3 cache_manager.py save
+
+      - name: Upload build cache
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-cache-${{ strategy.job-index }}
+          path: build-cache.tar.xz
+          retention-days: 1
+
       - name: Prepare artifacts
         run: |
           mkdir -p artifacts
@@ -184,7 +171,7 @@ jobs:
           path: artifacts/*
 
   release:
-    needs: build
+    needs: [prepare, build]
     if: ${{ github.event.inputs.make_release == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -200,6 +187,21 @@ jobs:
           pattern: '*_kernel-*'
           merge-multiple: true
 
+      - name: Download build cache
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'build-cache-*'
+          path: .
+          merge-multiple: true
+
+      - name: Merge build caches
+        run: |
+          mkdir -p ~/.ccache ~/.cache
+          for cache in build-cache-*.tar.xz; do
+            [ -f "$cache" ] && tar -xf "$cache" -C ~
+          done
+          tar -cJf build-cache.tar.xz -C ~ .ccache .cache 2>/dev/null || echo "No cache to merge"
+
       - name: Generate checksums
         run: |
           echo "=== Creating checksums ==="
@@ -207,69 +209,9 @@ jobs:
 
       - name: Generate release body
         run: |
-          python3 << 'PYEOF'
-          import json
-          import urllib.request
-          import ssl
-
-          with open('.github/workflows/matrix.json', 'r') as f:
-              matrix = json.load(f)
-
-          configs = []
-          for key in sorted(matrix.keys()):
-              android, kernel = key.split('-')
-              version = android.replace('android', '')
-              configs.append("- Android " + version + " (Kernel " + kernel + ")")
-
-          ssl_context = ssl.create_default_context()
-          ssl_context.check_hostname = False
-          ssl_context.verify_mode = ssl.CERT_NONE
-
-          ksu_tag = "latest"
-          ksu_commit = "unknown"
-
-          try:
-              tags_url = "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/git/refs/tags"
-              req = urllib.request.Request(tags_url, headers={'User-Agent': 'Python'})
-              with urllib.request.urlopen(req, context=ssl_context) as response:
-                  tags = json.loads(response.read())
-                  if tags:
-                      ksu_tag = tags[-1]['ref'].split('/')[-1]
-          except:
-              pass
-
-          try:
-              commits_url = "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/git/ref/heads/main"
-              req = urllib.request.Request(commits_url, headers={'User-Agent': 'Python'})
-              with urllib.request.urlopen(req, context=ssl_context) as response:
-                  ref = json.loads(response.read())
-                  ksu_commit = ref['object']['sha'][:7]
-          except:
-              pass
-
-          lines = [
-              "## GKI Kernel with SukiSU & SUSFS v2.1.0",
-              "",
-              "### SukiSU Info",
-              "- Tag: `" + ksu_tag + "`",
-              "- Commit: `" + ksu_commit + "`",
-              "",
-              "### Supported Configurations",
-          ]
-          lines.extend(configs)
-          lines.extend([
-              "",
-              "### Features",
-              "- SUSFS v2.1.0",
-              "- Manual Syscall Hooks",
-              "- Magic Mount Support",
-              "- BBR Support",
-              "- LZ4KD Support",
-          ])
-
-          with open('RELEASE_BODY.md', 'w') as f:
-              f.write('\n'.join(lines))
-          PYEOF
+          cd ./.github/workflows/scripts
+          python3 release_generator.py ../../../../all-artifacts/RELEASE_BODY.md
+        working-directory: ${{ github.workspace }}
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -281,4 +223,5 @@ jobs:
             *AnyKernel3*.zip
             *.img
             SHA256SUMS.txt
-          body_path: RELEASE_BODY.md
+            build-cache.tar.xz
+          body_path: all-artifacts/RELEASE_BODY.md
