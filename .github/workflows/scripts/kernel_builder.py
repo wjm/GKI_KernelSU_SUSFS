@@ -305,8 +305,13 @@ CONFIG_ZRAM_WRITEBACK=y
         self.env["AVBTOOL"] = str(self.toolchain_dir / "linux-x86/bin/avbtool")
         self.env["MKBOOTIMG"] = str(self.mkbootimg_dir / "mkbootimg.py")
         self.env["UNPACK_BOOTIMG"] = str(self.mkbootimg_dir / "unpack_bootimg.py")
+
+        # 设置签名密钥路径
+        if "BOOT_SIGN_KEY_PATH" in os.environ:
+            self.env["BOOT_SIGN_KEY_PATH"] = os.environ["BOOT_SIGN_KEY_PATH"]
+
         self.shell.env = self.env
-        
+
         logger.info("=== 工具链准备完成 ===")
     
     def setup_repo_tool(self) -> None:
