@@ -754,9 +754,6 @@ CONFIG_ZRAM_WRITEBACK=y
         # ZRAM 配置
         if self.config.use_zram:
             self._configure_zram()
-        
-        # Android 14/15 Bazel 配置
-        if self.config.android_version in ["android14", "android15"]:
             self._configure_bazel()
         
         # 默认 BBR
