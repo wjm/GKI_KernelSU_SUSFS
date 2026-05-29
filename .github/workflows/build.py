@@ -55,9 +55,6 @@ def load_build_matrix() -> dict:
             {"sub_level": "236", "os_patch_level": "2025-05", "revision": "r1"},
             {"sub_level": "X", "os_patch_level": "lts", "revision": "r1"},
         ],
-        "android13-5.10": [
-            {"sub_level": "X", "os_patch_level": "lts"},
-        ],
         "android13-5.15": [
             {"sub_level": "74", "os_patch_level": "2023-01"},
             {"sub_level": "123", "os_patch_level": "2023-11"},
@@ -66,9 +63,6 @@ def load_build_matrix() -> dict:
             {"sub_level": "178", "os_patch_level": "2025-03"},
             {"sub_level": "180", "os_patch_level": "2025-05"},
             {"sub_level": "189", "os_patch_level": "2025-09"},
-        ],
-        "android14-5.15": [
-            {"sub_level": "X", "os_patch_level": "lts"},
         ],
         "android14-6.1": [
             {"sub_level": "78", "os_patch_level": "2024-06"},

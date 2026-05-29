@@ -174,10 +174,6 @@ uname -r | sed 's/^[^-]*//'
     {"sub_level": "145", "os_patch_level": "2025-09"}
   ]
 }
-```
-
-修改后运行 `python generate_workflow.py` 更新 workflow 文件。
-
 ---
 
 ## 更多内容
