@@ -29,9 +29,6 @@ on:
         required: true
         type: choice
         options:
-        - Official
-        - Next
-        - MKSU
         - SukiSU
         default: SukiSU
       kernelsu_branch:
@@ -246,12 +243,12 @@ jobs:
       - get_manager
     if: always()
     env:
-      RELEASE_NAME: "GKI Kernel: ${{ inputs.kernelsu_variant == 'Next' && 'KernelSU-' || '' }} ${{ inputs.kernelsu_variant }}"
+      RELEASE_NAME: "GKI Kernel: SukiSU"
       INITIAL_RELEASE_NOTES: |
-        This release includes **${{ inputs.kernelsu_variant == 'Next' && 'KernelSU' || '' }}${{ inputs.kernelsu_variant }}**
+        This release includes **SukiSU**
         
         Features:
-        -> ${{ inputs.kernelsu_variant == 'Next' && 'KernelSU-' || '' }}${{ inputs.kernelsu_variant }}-${{ inputs.kernelsu_branch }}
+        -> SukiSU-${{ inputs.kernelsu_branch }}
         -> SUSFS ඞ v2.1.0
         -> Manual Syscall Hooks for better hiding
         -> Magic Mount Support
@@ -341,33 +338,15 @@ jobs:
       - name: Set KSU Version and Release Name
         if: ${{ steps.release_check.outcome == 'success' }}
         run: |
-          # Use temporary directories to avoid conflicts
-          if [ "${{ inputs.kernelsu_variant }}" = "Next" ]; then
-            echo "Processing Next variant"
-            git clone https://github.com/KernelSU-Next/KernelSU-Next.git ksu-next-tmp
-            cd ksu-next-tmp
-            KSU_GIT_VERSION=$(git rev-list --count HEAD)
-            KSU_VERSION=$((10000 + KSU_GIT_VERSION + 200))
-            echo "Next version: $KSU_VERSION"
-            cd ..
-            rm -rf ksu-next-tmp
-            echo "RELEASE_NAME=\"GKI Kernel: KernelSU-Next ($KSU_VERSION) & SUSFS v2.1.0\"" >> $GITHUB_ENV
-            
-          elif [ "${{ inputs.kernelsu_variant }}" = "SukiSU" ]; then
-            echo "Processing SukiSU variant"
-            git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git suki-tmp
-            cd suki-tmp
-            KSU_GIT_VERSION=$(git rev-list --count HEAD)
-            KSU_VERSION=$((4 * 10000 + KSU_GIT_VERSION - 2815))
-            echo "SukiSU version: $KSU_VERSION"
-            cd ..
-            rm -rf suki-tmp
-            echo "RELEASE_NAME=\"GKI Kernel: SukiSU ($KSU_VERSION) & SUSFS v2.1.0\"" >> $GITHUB_ENV
-            
-          else
-            echo "Using default naming for variant: ${{ inputs.kernelsu_variant }}"
-            echo "RELEASE_NAME=\"GKI Kernel: ${{ inputs.kernelsu_variant }} & SUSFS v2.1.0\"" >> $GITHUB_ENV
-          fi
+          echo "Processing SukiSU variant"
+          git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git suki-tmp
+          cd suki-tmp
+          KSU_GIT_VERSION=$(git rev-list --count HEAD)
+          KSU_VERSION=$((4 * 10000 + KSU_GIT_VERSION - 2815))
+          echo "SukiSU version: $KSU_VERSION"
+          cd ..
+          rm -rf suki-tmp
+          echo "RELEASE_NAME=\"GKI Kernel: SukiSU ($KSU_VERSION) & SUSFS v2.1.0\"" >> $GITHUB_ENV
           
       - name: Fetch KSU and SUSFS Commit Info
         id: build_notes
@@ -376,58 +355,19 @@ jobs:
           # Handle 'Other' branch selection
           if [[ "${{ inputs.kernelsu_branch }}" == "Other(其他/指定)" ]]; then
             echo "Using custom branch selection"
-            if [[ "${{ inputs.kernelsu_variant }}" == "Official" ]]; then
-              KSU_BRANCH="main"
-            elif [[ "${{ inputs.kernelsu_variant }}" == "Next" ]]; then
-              KSU_BRANCH="next"
-            else
-              KSU_BRANCH="main"  # Default for MKSU/SukiSU
-            fi
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev(开发)" || "${{ inputs.kernelsu_variant }}" == "MKSU" || "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
-            if [[ "${{ inputs.kernelsu_variant }}" == "Official" || "${{ inputs.kernelsu_variant }}" == "MKSU" || "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
-              KSU_BRANCH="main"
-            elif [[ "${{ inputs.kernelsu_variant }}" == "Next" ]]; then
-              KSU_BRANCH="next"
-            fi
-          elif [[ "${{ inputs.kernelsu_branch }}" == "Stable(标准)" && "${{ inputs.kernelsu_variant }}" != "MKSU" ]]; then
-            KSU_REPO_URL=""
-            if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
-              KSU_REPO_URL="https://github.com/tiann/KernelSU.git"
-            elif [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-              KSU_REPO_URL="https://github.com/KernelSU-Next/KernelSU-Next.git"
-            elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-              KSU_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
-            fi
-            
-            if [ -n "$KSU_REPO_URL" ]; then
-              TAG=$(git ls-remote --tags --sort=-v:refname "$KSU_REPO_URL" | grep -o 'refs/tags/.*' | cut -d'/' -f3 | head -n1)
-              KSU_BRANCH="${TAG:-UNKNOWN_TAG}"
-            else
-              KSU_BRANCH="main"
-            fi
+            KSU_BRANCH="main"
+          elif [[ "${{ inputs.kernelsu_branch }}" == "Dev(开发)" || "${{ inputs.kernelsu_variant }}" == "SukiSU" ]]; then
+            KSU_BRANCH="main"
+          elif [[ "${{ inputs.kernelsu_branch }}" == "Stable(标准)" ]]; then
+            KSU_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
+            TAG=$(git ls-remote --tags --sort=-v:refname "$KSU_REPO_URL" | grep -o 'refs/tags/.*' | cut -d'/' -f3 | head -n1)
+            KSU_BRANCH="${TAG:-UNKNOWN_TAG}"
           fi
           
           echo "KSU_BRANCH=$KSU_BRANCH" >> $GITHUB_ENV
           
-          KSU_REPO_URL=""
-          KSU_REPO_URL2=""
-          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
-            KSU_REPO_URL="https://github.com/tiann/KernelSU.git"
-            KSU_REPO_URL2="tiann/KernelSU"
-          elif [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            KSU_REPO_URL="https://github.com/KernelSU-Next/KernelSU-Next.git"
-            KSU_REPO_URL2="KernelSU-Next/KernelSU-Next"
-          elif [ "${{ inputs.kernelsu_variant }}" == "MKSU" ]; then
-            KSU_REPO_URL="https://github.com/5ec1cff/KernelSU.git"
-            KSU_REPO_URL2="5ec1cff/KernelSU"
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            KSU_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
-            KSU_REPO_URL2="SukiSU-Ultra/SukiSU-Ultra"
-          else
-            echo "Warning: Unknown KernelSU variant selected. Defaulting to Official for URL generation."
-            KSU_REPO_URL="https://github.com/tiann/KernelSU.git"
-            KSU_REPO_URL2="tiann/KernelSU"
-          fi
+          KSU_REPO_URL="https://github.com/SukiSU-Ultra/SukiSU-Ultra.git"
+          KSU_REPO_URL2="SukiSU-Ultra/SukiSU-Ultra"
           
           KSU_REF=""
           KSU_URL=""
@@ -445,15 +385,7 @@ jobs:
           
           FINAL_RELEASE_NOTES="${{ env.INITIAL_RELEASE_NOTES }}"
           
-          if [ "${{ inputs.kernelsu_variant }}" == "Official" ]; then
-            FINAL_RELEASE_NOTES+="\nOfficial Manager:\n-> https://github.com/tiann/KernelSU"
-          elif [ "${{ inputs.kernelsu_variant }}" == "Next" ]; then
-            FINAL_RELEASE_NOTES+="\nNext Manager:\n-> https://github.com/KernelSU-Next/KernelSU-Next"
-          elif [ "${{ inputs.kernelsu_variant }}" == "MKSU" ]; then
-            FINAL_RELEASE_NOTES+="\nMKSU Manager:\n-> https://github.com/5ec1cff/KernelSU"
-          elif [ "${{ inputs.kernelsu_variant }}" == "SukiSU" ]; then
-            FINAL_RELEASE_NOTES+="\nSukiSU Manager:\n-> https://github.com/SukiSU-Ultra/SukiSU-Ultra"
-          fi
+          FINAL_RELEASE_NOTES+="\nSukiSU Manager:\n-> https://github.com/SukiSU-Ultra/SukiSU-Ultra"
           
           FINAL_RELEASE_NOTES+="\n\nLTO: thin"
           FINAL_RELEASE_NOTES+="\n\n<details>"
