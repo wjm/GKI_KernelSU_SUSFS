@@ -20,7 +20,7 @@
 2. 选择 **Kernel Build**
 3. 点击 **Run workflow**
 4. 选择 Android 版本、Kernel 版本和构建选项
-5. 可选：指定 KernelSU 或 SUSFS 的 commit hash
+5. 可选：指定 SukiSU-Ultra 或 SUSFS 的 commit hash
 
 #### 方式二：构建所有版本
 1. 选择 **Build Kernels**

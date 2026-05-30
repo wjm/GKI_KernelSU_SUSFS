@@ -25,6 +25,11 @@ on:
         required: false
         type: string
         default: ''
+      custom_version:
+        description: '自定义版本名称 (可选)'
+        required: false
+        type: string
+        default: ''
       use_zram:
         description: '启用 ZRAM (LZ4KD)'
         required: true
@@ -45,11 +50,11 @@ on:
         required: true
         type: boolean
         default: true
-      custom_version:
-        description: '自定义版本名称 (可选)'
-        required: false
-        type: string
-        default: ''
+      send_telegram:
+        description: '发送 Telegram 通知'
+        required: true
+        type: boolean
+        default: true
 
 env:
   PYTHON_VERSION: '3.10'
@@ -239,6 +244,7 @@ jobs:
 
       - name: Create release
         uses: softprops/action-gh-release@v2
+        id: create_release
         with:
           tag_name: v2.1.0-${{ github.run_number }}
           name: GKI Kernel v2.1.0-${{ github.run_number }}
@@ -249,3 +255,17 @@ jobs:
             SHA256SUMS.txt
             build-cache-${{ github.ref_name }}.tar.xz
           body_path: all-artifacts/RELEASE_BODY.md
+
+      - name: Send Telegram Notification
+        if: ${{ github.event.inputs.send_telegram == 'true' && steps.create_release.conclusion == 'success' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
+        run: |
+          cd ./.github/workflows/scripts
+          python3 telegram_notify.py release \
+            "v2.1.0-${{ github.run_number }}" \
+            "https://github.com/${{ github.repository }}/releases/tag/v2.1.0-${{ github.run_number }}" \
+            "../../../../all-artifacts/RELEASE_BODY.md" \
+            "../../../../SHA256SUMS.txt"
