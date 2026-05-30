@@ -4,6 +4,7 @@ import sys
 import json
 import tarfile
 import urllib.request
+import urllib.error
 import ssl
 import subprocess
 from pathlib import Path
@@ -42,16 +43,25 @@ class CacheManager:
             req = urllib.request.Request(url, headers={'User-Agent': 'Python'})
             with urllib.request.urlopen(req, context=self._get_ssl_context()) as response:
                 return json.loads(response.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None  # Not found, not an error
+            print(f"请求失败 (HTTP {e.code}): {e.reason}")
+            return None
         except Exception as e:
             print(f"请求失败: {e}")
             return None
 
     def get_latest_release(self) -> Optional[dict]:
-        return self._make_request(f"https://api.github.com/repos/{self.repo}/releases/latest")
+        release = self._make_request(f"https://api.github.com/repos/{self.repo}/releases/latest")
+        if not release:
+            print(f"未找到 releases")
+        return release
 
     def get_cache_url(self, cache_filename: str) -> Optional[str]:
         release = self.get_latest_release()
         if not release:
+            print(f"未找到 releases，无法获取缓存 URL")
             return None
         for asset in release.get('assets', []):
             if asset['name'] == cache_filename:
