@@ -62,8 +62,13 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-latest
+    env:
+      SCRIPTS_DIR: ./.github/workflows/scripts
     outputs:
       build_matrix: ${{ steps.generate.outputs.matrix }}
+      kernel_version: ${{ steps.generate.outputs.kernel_version }}
+      classified_matrix: ${{ steps.generate.outputs.classified_matrix }}
+      matrix_summary: ${{ steps.generate.outputs.matrix_summary }}
       cache_version: ${{ steps.get_cache.outputs.version }}
     steps:
       - name: Checkout code
@@ -71,15 +76,11 @@ jobs:
 
       - name: Get latest cache version
         id: get_cache
-        run: |
-          cd ./.github/workflows/scripts
-          python3 cache_manager.py get-version ${{ github.repository }} ${{ github.ref_name }}
+        run: python3 ${{ env.SCRIPTS_DIR }}/cache_manager.py get-version ${{ github.repository }} ${{ github.ref_name }}
 
       - name: Generate build matrix
         id: generate
-        run: |
-          cd ./.github/workflows/scripts
-          python3 matrix_generator.py
+        run: python3 ${{ env.SCRIPTS_DIR }}/matrix_generator.py
 
   build:
     needs: prepare
@@ -88,6 +89,8 @@ jobs:
       fail-fast: false
       matrix:
         config: ${{ fromJson(needs.prepare.outputs.build_matrix) }}
+    env:
+      SCRIPTS_DIR: ./.github/workflows/scripts
     steps:
       - name: Maximize build space
         uses: AdityaGarg8/remove-unwanted-software@v5
@@ -134,13 +137,11 @@ jobs:
 
       - name: Download build cache
         if: needs.prepare.outputs.cache_version != ''
-        run: |
-          cd ./.github/workflows/scripts
-          python3 cache_manager.py download "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
+        run: python3 ${{ env.SCRIPTS_DIR }}/cache_manager.py download "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
 
       - name: Build kernel
         run: |
-          cd ./.github/workflows/scripts
+          cd ${{ env.SCRIPTS_DIR }}
 
           ARGS="--android ${{ matrix.config.android }}"
           ARGS="$ARGS --kernel ${{ matrix.config.kernel }}"
@@ -160,9 +161,7 @@ jobs:
           python3 build.py $ARGS
 
       - name: Save build cache
-        run: |
-          cd ./.github/workflows/scripts
-          python3 cache_manager.py save "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
+        run: python3 ${{ env.SCRIPTS_DIR }}/cache_manager.py save "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
 
       - name: Upload build cache
         uses: actions/upload-artifact@v7
@@ -183,6 +182,8 @@ jobs:
           else
             echo "artifacts_exist=true" >> $GITHUB_OUTPUT
             ls -la artifacts/
+            # 生成 SHA256SUMS
+            cd artifacts && sha256sum * > SHA256SUMS.txt && cd ..
           fi
 
       - name: Upload artifacts
@@ -192,12 +193,33 @@ jobs:
           name: kernel-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
           path: artifacts/*
 
+      - name: Record build result
+        if: always()
+        run: |
+          mkdir -p build-results
+          # 复制 SHA256SUMS
+          if [ -f "artifacts/SHA256SUMS.txt" ]; then
+            cp artifacts/SHA256SUMS.txt build-results/${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}.txt
+          fi
+          # 记录构建状态
+          echo "${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}:outcome=${{ job.status }}" >> build-results/status.txt
+
+      - name: Upload build results
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-results-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
+          path: build-results/
+          retention-days: 1
+
   release:
     needs: [prepare, build]
     if: ${{ github.event.inputs.make_release == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      SCRIPTS_DIR: ./.github/workflows/scripts
+      WORKSPACE_ROOT: ${{ github.workspace }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -236,18 +258,39 @@ jobs:
           echo "=== Creating checksums ==="
           sha256sum * > SHA256SUMS.txt
 
-      - name: Generate release body
+      - name: Download build results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'build-results-*'
+          path: build-results
+          merge-multiple: true
+
+      - name: Prepare build summary
+        id: prepare-summary
         run: |
-          cd ./.github/workflows/scripts
-          python3 release_generator.py ../../../../all-artifacts/RELEASE_BODY.md
-        working-directory: ${{ github.workspace }}
+          echo "=== Build Summary ==="
+          TOTAL=$(cat build-results/status.txt 2>/dev/null | wc -l || echo 0)
+          SUCCESS=$(grep ':outcome=success$' build-results/status.txt 2>/dev/null | wc -l || echo 0)
+          FAILED=$(grep ':outcome=failure$' build-results/status.txt 2>/dev/null | wc -l || echo 0)
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          echo "success=$SUCCESS" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "=== Status ==="
+          cat build-results/status.txt 2>/dev/null || echo "No status file"
+          echo "=== Hashes ==="
+          cat build-results/*.txt 2>/dev/null | grep -v ':outcome=' | head -50
+
+      - name: Generate release body
+        if: steps.prepare-summary.outputs.success != '0'
+        run: python3 ${{ env.SCRIPTS_DIR }}/release_generator.py ${{ env.WORKSPACE_ROOT }}/all-artifacts/RELEASE_BODY.md
 
       - name: Create release
+        if: steps.prepare-summary.outputs.success != '0'
         uses: softprops/action-gh-release@v2
         id: create_release
         with:
-          tag_name: v2.1.0-${{ github.run_number }}
-          name: GKI Kernel v2.1.0-${{ github.run_number }}
+          tag_name: ${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}
+          name: GKI Kernel ${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}
           draft: true
           files: |
             *AnyKernel3*.zip
@@ -257,15 +300,39 @@ jobs:
           body_path: all-artifacts/RELEASE_BODY.md
 
       - name: Send Telegram Notification
-        if: ${{ github.event.inputs.send_telegram == 'true' && steps.create_release.conclusion == 'success' }}
+        if: ${{ github.event.inputs.send_telegram == 'true' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_MESSAGE_THREAD_ID: ${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}
         run: |
-          cd ./.github/workflows/scripts
-          python3 telegram_notify.py release \
-            "v2.1.0-${{ github.run_number }}" \
-            "https://github.com/${{ github.repository }}/releases/tag/v2.1.0-${{ github.run_number }}" \
-            "../../../../all-artifacts/RELEASE_BODY.md" \
-            "../../../../SHA256SUMS.txt"
+          # 准备构建统计
+          TOTAL="${{ steps.prepare-summary.outputs.total }}"
+          SUCCESS="${{ steps.prepare-summary.outputs.success }}"
+          FAILED="${{ steps.prepare-summary.outputs.failed }}"
+
+          # 生成状态文件供脚本使用
+          echo "total=$TOTAL" > /tmp/build_stats.txt
+          echo "success=$SUCCESS" >> /tmp/build_stats.txt
+          echo "failed=$FAILED" >> /tmp/build_stats.txt
+
+          # 检查是否有成功的构建
+          if [ "$SUCCESS" -gt 0 ]; then
+            python3 ${{ env.SCRIPTS_DIR }}/telegram_notify.py release \
+              "${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
+              "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
+              "${{ env.WORKSPACE_ROOT }}/all-artifacts/RELEASE_BODY.md" \
+              "${{ env.WORKSPACE_ROOT }}/SHA256SUMS.txt" \
+              "/tmp/build_stats.txt" \
+              "$SUCCESS" \
+              "$FAILED"
+          else
+            python3 ${{ env.SCRIPTS_DIR }}/telegram_notify.py release \
+              "${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
+              "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
+              "" \
+              "" \
+              "/tmp/build_stats.txt" \
+              "0" \
+              "$TOTAL"
+          fi
