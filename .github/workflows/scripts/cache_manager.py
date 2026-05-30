@@ -91,7 +91,7 @@ class CacheManager:
         try:
             self.ccache_dir.mkdir(parents=True, exist_ok=True)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_file = Path.cwd() / cache_filename
+            cache_file = Path.home() / cache_filename
 
             with tarfile.open(cache_file, 'w:xz') as tar:
                 if self.ccache_dir.exists():
@@ -99,7 +99,7 @@ class CacheManager:
                 if self.cache_dir.exists():
                     tar.add(self.cache_dir, arcname='.cache')
 
-            print(f"缓存已打包: {cache_filename}")
+            print(f"缓存已打包: {cache_file}")
             return True
         except Exception as e:
             print(f"保存缓存失败: {e}")
