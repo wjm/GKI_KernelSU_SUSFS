@@ -98,6 +98,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:

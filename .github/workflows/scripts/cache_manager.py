@@ -18,54 +18,47 @@ class CacheManager:
         self.cache_dir = Path.home() / ".cache"
 
     def _get_current_branch(self) -> str:
-        """获取当前分支名"""
         try:
             branch = os.environ.get('GITHUB_REF_NAME', '')
             if branch:
-                branch = branch.replace('/', '-').replace(' ', '-')
-                return branch
+                return branch.replace('/', '-').replace(' ', '-')
 
-            result = subprocess.run(
-                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
-                capture_output=True, text=True
-            )
+            result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                                   capture_output=True, text=True)
             if result.returncode == 0:
-                branch = result.stdout.strip()
-                branch = branch.replace('/', '-').replace(' ', '-')
-                return branch
+                return result.stdout.strip().replace('/', '-').replace(' ', '-')
         except Exception:
             pass
         return 'unknown'
 
-    def get_latest_release(self) -> Optional[dict]:
-        """获取最新的 Release"""
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+    def _get_ssl_context(self) -> ssl.SSLContext:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
 
+    def _make_request(self, url: str) -> Optional[dict]:
         try:
-            url = f"https://api.github.com/repos/{self.repo}/releases/latest"
             req = urllib.request.Request(url, headers={'User-Agent': 'Python'})
-            with urllib.request.urlopen(req, context=ssl_context) as response:
+            with urllib.request.urlopen(req, context=self._get_ssl_context()) as response:
                 return json.loads(response.read())
         except Exception as e:
-            print(f"获取最新 Release 失败: {e}")
+            print(f"请求失败: {e}")
             return None
 
+    def get_latest_release(self) -> Optional[dict]:
+        return self._make_request(f"https://api.github.com/repos/{self.repo}/releases/latest")
+
     def get_cache_url(self, cache_filename: str) -> Optional[str]:
-        """获取指定缓存文件的下载 URL"""
         release = self.get_latest_release()
         if not release:
             return None
-
         for asset in release.get('assets', []):
             if asset['name'] == cache_filename:
                 return asset['browser_download_url']
-
         return None
 
     def download_cache(self, android: str, kernel: str, sub_level: str) -> bool:
-        """下载并解压指定内核版本的缓存"""
         cache_filename = f"build-cache-{self.branch}-{android}-{kernel}-{sub_level}.tar.xz"
         cache_url = self.get_cache_url(cache_filename)
 
@@ -73,44 +66,31 @@ class CacheManager:
             print(f"未找到缓存: {cache_filename}，跳过下载")
             return False
 
-        print(f"下载缓存: {cache_url}")
-
         try:
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-
             req = urllib.request.Request(cache_url, headers={'User-Agent': 'Python'})
-            with urllib.request.urlopen(req, context=ssl_context) as response:
-                data = response.read()
+            with urllib.request.urlopen(req, context=self._get_ssl_context()) as response:
                 cache_file = Path.home() / cache_filename
                 with open(cache_file, 'wb') as f:
-                    f.write(data)
+                    f.write(response.read())
 
-            print("解压缓存...")
             with tarfile.open(cache_file, 'r:xz') as tar:
                 tar.extractall(str(Path.home()))
             cache_file.unlink()
             print("缓存恢复完成")
             return True
-
         except Exception as e:
             print(f"下载缓存失败: {e}")
             return False
 
     def save_cache(self, android: str, kernel: str, sub_level: str) -> bool:
-        """打包并保存指定内核版本的缓存"""
         if not self.ccache_dir.exists() and not self.cache_dir.exists():
             print("没有找到缓存目录，跳过保存")
             return False
 
         cache_filename = f"build-cache-{self.branch}-{android}-{kernel}-{sub_level}.tar.xz"
-        print(f"打包缓存为: {cache_filename}...")
-
         try:
             self.ccache_dir.mkdir(parents=True, exist_ok=True)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-
             cache_file = Path.cwd() / cache_filename
 
             with tarfile.open(cache_file, 'w:xz') as tar:
@@ -119,24 +99,15 @@ class CacheManager:
                 if self.cache_dir.exists():
                     tar.add(self.cache_dir, arcname='.cache')
 
-            print(f"缓存已打包: {cache_file}")
+            print(f"缓存已打包: {cache_filename}")
             return True
-
         except Exception as e:
             print(f"保存缓存失败: {e}")
             return False
 
     def get_cache_version(self) -> Optional[str]:
-        """获取最新缓存版本（返回 release tag）"""
         release = self.get_latest_release()
-        if not release:
-            return None
-        return str(release['tag_name'])
-
-    @staticmethod
-    def get_cache_filename(branch: str, android: str, kernel: str, sub_level: str) -> str:
-        """生成缓存文件名"""
-        return f"build-cache-{branch}-{android}-{kernel}-{sub_level}.tar.xz"
+        return str(release['tag_name']) if release else None
 
 
 def main():
@@ -150,52 +121,35 @@ def main():
     action = sys.argv[1]
 
     if action == 'download':
-        if len(sys.argv) < 6:
+        if len(sys.argv) < 7:
             print("错误: download 需要 <repo> <branch> <android> <kernel> <sub_level>")
             sys.exit(1)
-        repo = sys.argv[2]
-        branch = sys.argv[3]
-        android = sys.argv[4]
-        kernel = sys.argv[5]
-        sub_level = sys.argv[6]
-
-        cache_manager = CacheManager(repo, branch)
-        success = cache_manager.download_cache(android, kernel, sub_level)
+        cache_manager = CacheManager(sys.argv[2], sys.argv[3])
+        success = cache_manager.download_cache(sys.argv[4], sys.argv[5], sys.argv[6])
         sys.exit(0 if success else 1)
 
     elif action == 'save':
-        if len(sys.argv) < 6:
+        if len(sys.argv) < 7:
             print("错误: save 需要 <repo> <branch> <android> <kernel> <sub_level>")
             sys.exit(1)
-        repo = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('GITHUB_REPOSITORY', '')
-        branch = sys.argv[3] if len(sys.argv) > 3 else os.environ.get('GITHUB_REF_NAME', '')
-        android = sys.argv[4]
-        kernel = sys.argv[5]
-        sub_level = sys.argv[6]
-
-        cache_manager = CacheManager(repo, branch)
-        success = cache_manager.save_cache(android, kernel, sub_level)
+        cache_manager = CacheManager(sys.argv[2], sys.argv[3])
+        success = cache_manager.save_cache(sys.argv[4], sys.argv[5], sys.argv[6])
         sys.exit(0 if success else 1)
 
     elif action == 'get-version':
         if len(sys.argv) < 3:
             print("错误: get-version 需要 <repo>")
             sys.exit(1)
-        repo = sys.argv[2]
-
-        cache_manager = CacheManager(repo)
+        cache_manager = CacheManager(sys.argv[2])
         version = cache_manager.get_cache_version()
         if version:
             print("version=" + version)
             with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
                 f.write('version=' + version + '\n')
-        else:
-            print("未找到缓存版本")
         sys.exit(0)
 
     else:
         print(f"未知操作: {action}")
-        print("可用操作: download, save, get-version")
         sys.exit(1)
 
 
