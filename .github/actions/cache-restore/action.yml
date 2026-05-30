@@ -1,0 +1,61 @@
+name: 'Restore Cache'
+description: 'Restores cache from GitHub Releases.'
+
+inputs:
+  cache_path:
+    description: 'Path where cache should be restored'
+    required: true
+    type: string
+  cache_key:
+    description: 'Primary key to restore cache'
+    required: true
+    type: string
+  cache_bucket:
+    description: 'The tag name for the release (e.g., general-cache)'
+    required: false
+    default: 'general-cache'
+
+outputs:
+  cache-hit:
+    description: 'Returns "true" if a cache was found and restored, otherwise "false"'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect and Download Cache
+      id: restore
+      shell: bash
+      env:
+        TARGET_REPO: "${{ github.repository }}"
+      run: |
+        set -euo pipefail
+
+        cd "$GITHUB_WORKSPACE"
+
+        TAG_NAME="${{ inputs.cache_bucket }}"
+        BASE_URL="https://github.com/${TARGET_REPO}/releases/download/$TAG_NAME"
+
+        echo "Searching for cache: ${{ inputs.cache_key }}"
+
+        # Try to download the cache file
+        CACHE_FILE="cache-${{ inputs.cache_key }}.tar.zst"
+
+        if curl -sL --fail -o "$CACHE_FILE" "$BASE_URL/$CACHE_FILE" 2>/dev/null; then
+          if [ -s "$CACHE_FILE" ]; then
+            echo "Cache found! Extracting..."
+            mkdir -p "${{ inputs.cache_path }}"
+            tar -I zstd -d -T0 -xf "$CACHE_FILE" -C "$(dirname "${{ inputs.cache_path }}")"
+            rm -f "$CACHE_FILE"
+            echo "cache-hit=true" >> "$GITHUB_OUTPUT"
+            echo "Cache restored successfully!"
+          else
+            echo "Cache file is empty, skipping..."
+            rm -f "$CACHE_FILE"
+            echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          echo "No cache found for key: ${{ inputs.cache_key }}"
+          rm -f "$CACHE_FILE"
+          echo "cache-hit=false" >> "$GITHUB_OUTPUT"
+        fi
