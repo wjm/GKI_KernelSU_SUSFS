@@ -91,7 +91,8 @@ class CacheManager:
         try:
             self.ccache_dir.mkdir(parents=True, exist_ok=True)
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_file = Path.home() / cache_filename
+            workspace = Path(os.environ.get('GITHUB_WORKSPACE', str(Path.home())))
+            cache_file = workspace / cache_filename
 
             with tarfile.open(cache_file, 'w:xz') as tar:
                 if self.ccache_dir.exists():
