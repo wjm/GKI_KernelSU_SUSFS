@@ -69,14 +69,14 @@ jobs:
       kernel_version: ${{ steps.generate.outputs.kernel_version }}
       classified_matrix: ${{ steps.generate.outputs.classified_matrix }}
       matrix_summary: ${{ steps.generate.outputs.matrix_summary }}
-      cache_version: ${{ steps.get_cache.outputs.version }}
+      cache_key: ${{ steps.get_cache_key.outputs.cache_key }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Get latest cache version
-        id: get_cache
-        run: python3 ${{ env.SCRIPTS_DIR }}/cache_manager.py get-version ${{ github.repository }} ${{ github.ref_name }}
+      - name: Get cache key
+        id: get_cache_key
+        run: echo "cache_key=${{ github.ref_name }}-ccache" >> $GITHUB_OUTPUT
 
       - name: Generate build matrix
         id: generate
@@ -135,9 +135,13 @@ jobs:
           ccache --set-config=compression=true
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
-      - name: Download build cache
-        if: needs.prepare.outputs.cache_version != ''
-        run: python3 ${{ env.SCRIPTS_DIR }}/cache_manager.py download "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}-
 
       - name: Build kernel
         run: |
@@ -160,15 +164,11 @@ jobs:
 
           python3 build.py $ARGS
 
-      - name: Save build cache
-        run: python3 ${{ env.SCRIPTS_DIR }}/cache_manager.py save "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
-
-      - name: Upload build cache
-        uses: actions/upload-artifact@v7
+      - name: Save ccache
+        uses: actions/cache@v4
         with:
-          name: build-cache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
-          path: build-cache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}.tar.xz
-          retention-days: 1
+          path: ~/.ccache
+          key: ccache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}-${{ github.sha }}
 
       - name: Prepare artifacts
         id: prepare-artifacts
@@ -231,28 +231,6 @@ jobs:
           pattern: '*_kernel-*'
           merge-multiple: true
 
-      - name: Download build cache
-        uses: actions/download-artifact@v8
-        with:
-          pattern: 'build-cache-*'
-          path: .
-          merge-multiple: true
-
-      - name: Merge build caches
-        run: |
-          mkdir -p ~/.ccache ~/.cache
-          for cache in build-cache-*.tar.xz; do
-            [ -f "$cache" ] && tar -xf "$cache" -C ~
-          done
-
-      - name: Upload branch cache to release
-        if: success()
-        run: |
-          tar -cJf build-cache-${{ github.ref_name }}.tar.xz -C ~ .ccache .cache 2>/dev/null || echo "No cache to upload"
-          if [ -f "build-cache-${{ github.ref_name }}.tar.xz" ]; then
-            echo "Branch cache created: build-cache-${{ github.ref_name }}.tar.xz"
-          fi
-
       - name: Generate checksums
         run: |
           echo "=== Creating checksums ==="
@@ -296,7 +274,6 @@ jobs:
             *AnyKernel3*.zip
             *.img
             SHA256SUMS.txt
-            build-cache-${{ github.ref_name }}.tar.xz
           body_path: all-artifacts/RELEASE_BODY.md
 
       - name: Send Telegram Notification
