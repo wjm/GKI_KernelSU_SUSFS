@@ -68,7 +68,7 @@ jobs:
         id: get_cache
         run: |
           cd ./.github/workflows/scripts
-          python3 cache_manager.py get-version ${{ github.repository }}
+          python3 cache_manager.py get-version ${{ github.repository }} ${{ github.ref_name }}
 
       - name: Generate build matrix
         id: generate
@@ -131,7 +131,7 @@ jobs:
         if: needs.prepare.outputs.cache_version != ''
         run: |
           cd ./.github/workflows/scripts
-          python3 cache_manager.py download ${{ github.repository }}
+          python3 cache_manager.py download "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
 
       - name: Build kernel
         run: |
@@ -157,22 +157,31 @@ jobs:
       - name: Save build cache
         run: |
           cd ./.github/workflows/scripts
-          python3 cache_manager.py save
+          python3 cache_manager.py save "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
 
       - name: Upload build cache
         uses: actions/upload-artifact@v4
         with:
-          name: build-cache-${{ strategy.job-index }}
-          path: build-cache.tar.xz
+          name: build-cache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
+          path: build-cache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}.tar.xz
           retention-days: 1
 
       - name: Prepare artifacts
+        id: prepare-artifacts
         run: |
           mkdir -p artifacts
           find /tmp/gki-build -name "*.zip" -type f -exec cp {} artifacts/ \;
           find /tmp/gki-build -name "*.img" -type f -exec cp {} artifacts/ \;
+          if [ -z "$(ls -A artifacts/)" ]; then
+            echo "没有找到构建产物"
+            echo "artifacts_exist=false" >> $GITHUB_OUTPUT
+          else
+            echo "artifacts_exist=true" >> $GITHUB_OUTPUT
+            ls -la artifacts/
+          fi
 
       - name: Upload artifacts
+        if: steps.prepare-artifacts.outputs.artifacts_exist == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
@@ -208,7 +217,14 @@ jobs:
           for cache in build-cache-*.tar.xz; do
             [ -f "$cache" ] && tar -xf "$cache" -C ~
           done
-          tar -cJf build-cache.tar.xz -C ~ .ccache .cache 2>/dev/null || echo "No cache to merge"
+
+      - name: Upload branch cache to release
+        if: success()
+        run: |
+          tar -cJf build-cache-${{ github.ref_name }}.tar.xz -C ~ .ccache .cache 2>/dev/null || echo "No cache to upload"
+          if [ -f "build-cache-${{ github.ref_name }}.tar.xz" ]; then
+            echo "Branch cache created: build-cache-${{ github.ref_name }}.tar.xz"
+          fi
 
       - name: Generate checksums
         run: |
@@ -231,5 +247,5 @@ jobs:
             *AnyKernel3*.zip
             *.img
             SHA256SUMS.txt
-            build-cache.tar.xz
+            build-cache-${{ github.ref_name }}.tar.xz
           body_path: all-artifacts/RELEASE_BODY.md
