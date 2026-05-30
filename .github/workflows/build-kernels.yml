@@ -233,11 +233,6 @@ jobs:
           pattern: '*_kernel-*'
           merge-multiple: true
 
-      - name: Generate checksums
-        run: |
-          echo "=== Creating checksums ==="
-          mkdir -p all-artifacts && sha256sum all-artifacts/* > all-artifacts/SHA256SUMS.txt
-
       - name: Download build results
         uses: actions/download-artifact@v8
         with:
@@ -248,6 +243,7 @@ jobs:
       - name: Prepare build summary
         id: prepare-summary
         run: |
+          mkdir -p build-results
           echo "=== Build Summary ==="
           TOTAL=$(cat build-results/status.txt 2>/dev/null | wc -l || echo 0)
           SUCCESS=$(grep ':outcome=success$' build-results/status.txt 2>/dev/null | wc -l || echo 0)
@@ -258,7 +254,7 @@ jobs:
           echo "=== Status ==="
           cat build-results/status.txt 2>/dev/null || echo "No status file"
           echo "=== Hashes ==="
-          cat build-results/*.txt 2>/dev/null | grep -v ':outcome=' | head -50
+          cat build-results/*.txt 2>/dev/null | grep -v ':outcome=' | head -50 || true
 
       - name: Generate release body
         if: steps.prepare-summary.outputs.success != '0'
@@ -277,7 +273,6 @@ jobs:
           files: |
             all-artifacts/*AnyKernel3*.zip
             all-artifacts/*.img
-            all-artifacts/SHA256SUMS.txt
           body_path: all-artifacts/RELEASE_BODY.md
 
       - name: Send Telegram Notification
@@ -303,7 +298,7 @@ jobs:
               "${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
               "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
               "${{ env.WORKSPACE_ROOT }}/all-artifacts/RELEASE_BODY.md" \
-              "${{ env.WORKSPACE_ROOT }}/all-artifacts/SHA256SUMS.txt" \
+              "" \
               "/tmp/build_stats.txt" \
               "$SUCCESS" \
               "$FAILED"
