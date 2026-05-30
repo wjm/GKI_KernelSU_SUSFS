@@ -55,7 +55,9 @@ class ReleaseGenerator:
 
     def save_body(self, output_path: str = "RELEASE_BODY.md"):
         body = self.generate_body()
-        with open(output_path, 'w') as f:
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, 'w') as f:
             f.write(body)
         print(body)
 

@@ -236,7 +236,7 @@ jobs:
       - name: Generate checksums
         run: |
           echo "=== Creating checksums ==="
-          sha256sum * > SHA256SUMS.txt
+          mkdir -p all-artifacts && sha256sum all-artifacts/* > all-artifacts/SHA256SUMS.txt
 
       - name: Download build results
         uses: actions/download-artifact@v8
@@ -262,7 +262,9 @@ jobs:
 
       - name: Generate release body
         if: steps.prepare-summary.outputs.success != '0'
-        run: python3 ${{ env.SCRIPTS_DIR }}/release_generator.py ${{ env.WORKSPACE_ROOT }}/all-artifacts/RELEASE_BODY.md
+        run: |
+          mkdir -p all-artifacts
+          python3 ${{ env.SCRIPTS_DIR }}/release_generator.py ${{ env.WORKSPACE_ROOT }}/all-artifacts/RELEASE_BODY.md
 
       - name: Create release
         if: steps.prepare-summary.outputs.success != '0'
@@ -273,9 +275,9 @@ jobs:
           name: GKI Kernel ${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}
           draft: true
           files: |
-            *AnyKernel3*.zip
-            *.img
-            SHA256SUMS.txt
+            all-artifacts/*AnyKernel3*.zip
+            all-artifacts/*.img
+            all-artifacts/SHA256SUMS.txt
           body_path: all-artifacts/RELEASE_BODY.md
 
       - name: Send Telegram Notification
@@ -301,7 +303,7 @@ jobs:
               "${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
               "https://github.com/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.kernel_version }}-${{ github.run_number }}" \
               "${{ env.WORKSPACE_ROOT }}/all-artifacts/RELEASE_BODY.md" \
-              "${{ env.WORKSPACE_ROOT }}/SHA256SUMS.txt" \
+              "${{ env.WORKSPACE_ROOT }}/all-artifacts/SHA256SUMS.txt" \
               "/tmp/build_stats.txt" \
               "$SUCCESS" \
               "$FAILED"
