@@ -369,6 +369,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         self._chdir(self.work_dir)
         config_file = self.work_dir / "common/arch/arm64/configs/gki_defconfig"
         if not config_file.exists():
+            logger.warning(f"配置文件不存在: {config_file}")
             return
 
         with open(config_file, "a") as f:
@@ -503,12 +504,60 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
                     f.write(content)
 
             if self.config.custom_version:
-                config_file = self.workspace / "common/arch/arm64/configs/gki_defconfig"
-                with open(config_file, "r") as f:
-                    content = f.read()
-                content = re.sub(r'^CONFIG_LOCALVERSION=".*"$', f'CONFIG_LOCALVERSION="{self.config.custom_version}"', content, flags=re.MULTILINE)
-                with open(config_file, "w") as f:
-                    f.write(content)
+                config_file = self.work_dir / "common/arch/arm64/configs/gki_defconfig"
+                if config_file.exists():
+                    with open(config_file, "r") as f:
+                        content = f.read()
+                    content = re.sub(r'^CONFIG_LOCALVERSION=".*"$', f'CONFIG_LOCALVERSION="{self.config.custom_version}"', content, flags=re.MULTILINE)
+                    with open(config_file, "w") as f:
+                        f.write(content)
+                else:
+                    logger.warning(f"配置文件不存在，跳过 custom_version 设置: {config_file}")
+
+    def show_kernel_config(self):
+        logger.info("=== 显示内核配置列表 ===")
+        self._chdir(self.work_dir)
+        config_file = self.work_dir / "common/arch/arm64/configs/gki_defconfig"
+        
+        if not config_file.exists():
+            logger.warning(f"配置文件不存在: {config_file}")
+            return
+        
+        with open(config_file, "r") as f:
+            lines = f.readlines()
+        
+        config_lines = [line.strip() for line in lines if line.strip().startswith("CONFIG_")]
+        
+        key_configs = {
+            "CONFIG_KSU": "KernelSU",
+            "CONFIG_KPM": "KPM",
+            "CONFIG_KSU_SUSFS": "SUSFS",
+            "CONFIG_BBG": "Baseband-guard",
+            "CONFIG_BBR": "BBR",
+            "CONFIG_ZRAM": "ZRAM",
+        }
+        
+        logger.info("关键配置状态:")
+        for prefix, name in key_configs.items():
+            found = [c for c in config_lines if c.startswith(prefix)]
+            if found:
+                status = "已启用"
+            else:
+                status = "未配置"
+            logger.info(f"  [{status}] {name}")
+            if found:
+                for f in sorted(found):
+                    logger.info(f"      -> {f}")
+        
+        # 显示 ZRAM 相关配置
+        if self.config.use_zram:
+            zram_configs = [c for c in config_lines if any(x in c for x in ["ZRAM", "ZSMALLOC", "LZ4", "LZ4KD", "CRYPTO_LZ4", "MODULE_SIG"])]
+            if zram_configs:
+                logger.info("ZRAM 相关配置:")
+                for zc in sorted(zram_configs):
+                    logger.info(f"  -> {zc}")
+        
+        logger.info("-" * 60)
 
     def build_kernel(self) -> bool:
         logger.info("=== 开始编译内核 ===")
@@ -624,7 +673,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         artifacts = []
         ak3_dir = self.anykernel_dir
 
-        for suffix, ext in [("", ""), ("-lz4", ".lz4"), ("-gz", ".gz")]:
+        for suffix in ["", "-lz4", "-gz"]:
             image_file = f"Image{suffix}"
             image_path = self.work_dir / image_file
             if not image_path.exists():
@@ -659,6 +708,7 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             self.apply_task_mmu_fixes()
             self.configure_kernel()
             self.configure_kernel_name()
+            self.show_kernel_config()
 
             if not self.build_kernel():
                 return BuildResult(success=False, config=self.config, message="内核编译失败", build_time=time.time() - start_time)
