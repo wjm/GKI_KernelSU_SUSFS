@@ -98,7 +98,6 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   build:
@@ -117,7 +116,7 @@ jobs:
           verbose: 'true'
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -139,7 +138,7 @@ jobs:
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.ccache
           key: ${{ github.event.inputs.android_version }}-${{ github.event.inputs.kernel_version }}-${{ github.event.inputs.sub_level }}-ccache-${{ github.sha }}
@@ -176,7 +175,7 @@ jobs:
           find /tmp/gki-build -name "*.img" -type f -exec cp {} artifacts/ \;
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-${{ github.event.inputs.android_version }}-${{ github.event.inputs.kernel_version }}-${{ github.event.inputs.sub_level }}
           path: artifacts/*

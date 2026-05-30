@@ -53,7 +53,6 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   prepare:
@@ -63,7 +62,7 @@ jobs:
       cache_version: ${{ steps.get_cache.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get latest cache version
         id: get_cache
@@ -98,7 +97,7 @@ jobs:
           verbose: 'true'
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -161,7 +160,7 @@ jobs:
           python3 cache_manager.py save "${{ github.repository }}" "${{ github.ref_name }}" "${{ matrix.config.android }}" "${{ matrix.config.kernel }}" "${{ matrix.config.sub_level }}"
 
       - name: Upload build cache
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-cache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
           path: build-cache-${{ github.ref_name }}-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}.tar.xz
@@ -183,7 +182,7 @@ jobs:
 
       - name: Upload artifacts
         if: steps.prepare-artifacts.outputs.artifacts_exist == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-${{ matrix.config.android }}-${{ matrix.config.kernel }}-${{ matrix.config.sub_level }}
           path: artifacts/*
@@ -196,17 +195,17 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: all-artifacts
           pattern: '*_kernel-*'
           merge-multiple: true
 
       - name: Download build cache
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: 'build-cache-*'
           path: .
