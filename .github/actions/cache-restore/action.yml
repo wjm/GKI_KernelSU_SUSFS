@@ -38,15 +38,15 @@ runs:
 
         echo "Searching for cache: ${{ inputs.cache_key }}"
 
-        # Try to download the cache file
         CACHE_FILE="cache-${{ inputs.cache_key }}.tar.zst"
 
-        if curl -sL --fail -o "$CACHE_FILE" "$BASE_URL/$CACHE_FILE" 2>/dev/null; then
+        echo "Downloading cache..."
+        if curl -sL --fail -o "$CACHE_FILE" "$BASE_URL/$CACHE_FILE"; then
           if [ -s "$CACHE_FILE" ]; then
-            echo "Cache found! Extracting..."
-            mkdir -p "${{ inputs.cache_path }}"
-            tar -I zstd -d -f "$CACHE_FILE" -C "$(dirname "${{ inputs.cache_path }}")"
-            rm -f "$CACHE_FILE"
+            echo "Cache found! Extracting to ${{ inputs.cache_path }}..."
+            cd "$(dirname "${{ inputs.cache_path }}")"
+            tar -I zstd -xf "$GITHUB_WORKSPACE/$CACHE_FILE"
+            rm -f "$GITHUB_WORKSPACE/$CACHE_FILE"
             echo "cache-hit=true" >> "$GITHUB_OUTPUT"
             echo "Cache restored successfully!"
           else
