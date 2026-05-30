@@ -45,7 +45,7 @@ runs:
           if [ -s "$CACHE_FILE" ]; then
             echo "Cache found! Extracting..."
             mkdir -p "${{ inputs.cache_path }}"
-            tar -I zstd -d -T0 -xf "$CACHE_FILE" -C "$(dirname "${{ inputs.cache_path }}")"
+            tar -I zstd -d -f "$CACHE_FILE" -C "$(dirname "${{ inputs.cache_path }}")"
             rm -f "$CACHE_FILE"
             echo "cache-hit=true" >> "$GITHUB_OUTPUT"
             echo "Cache restored successfully!"

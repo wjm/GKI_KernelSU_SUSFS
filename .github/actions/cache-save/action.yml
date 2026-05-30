@@ -29,6 +29,7 @@ runs:
       run: |
         set -euo pipefail
 
+        CACHE_PATH="${{ inputs.cache_path }}"
         TAG_NAME="${{ inputs.cache_bucket }}"
         CACHE_FILE="cache-${{ inputs.cache_key }}.tar.zst"
 
@@ -44,17 +45,14 @@ runs:
         echo "Cache not found, will upload..."
 
         # Check if target path exists
-        if [ ! -d "${{ inputs.cache_path }}" ] && [ ! -f "${{ inputs.cache_path }}" ]; then
-          echo "Target path not found: ${{ inputs.cache_path }}"
+        if [ ! -e "$CACHE_PATH" ]; then
+          echo "Target path not found: $CACHE_PATH"
           echo "Skipping cache save."
           exit 0
         fi
 
         echo "Creating cache archive..."
-        DIR_NAME=$(dirname "${{ inputs.cache_path }}")
-        BASE_NAME=$(basename "${{ inputs.cache_path }}")
-
-        tar -I zstd -T0 -cvf "$CACHE_FILE" -C "$DIR_NAME" "$BASE_NAME"
+        tar -I zstd -c -f "$CACHE_FILE" -C "$CACHE_PATH/.." "$(basename "$CACHE_PATH")"
 
         FILE_SIZE=$(stat -c%s "$CACHE_FILE" 2>/dev/null || stat -f%z "$CACHE_FILE" 2>/dev/null)
         echo "Archive created: $CACHE_FILE ($FILE_SIZE bytes)"
