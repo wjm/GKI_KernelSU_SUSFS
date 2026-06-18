@@ -298,8 +298,47 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             patch_file = common_dir / self.config.get_susfs_patch_filename()
             if patch_file.exists():
                 self._chdir(common_dir)
+                # 较新的 GKI 子版本在 fs/namespace.c 新增了 #include <trace/hooks/blk.h>，
+                # 会使 SUSFS 补丁中插入声明块(susfs_def.h / CL_COPY_MNT_NS 等)的 hunk 上下文
+                # 失配并被丢弃，导致编译时出现 VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT、
+                # susfs_is_current_ksu_domain 等 "undeclared identifier" 错误。
+                # 参考 WildKernels 做法：打补丁前临时移除该 include，打完后再恢复。
+                self._shim_namespace_for_susfs(restore=False)
                 self._run_cmd(f"patch -p1 --fuzz=3 < {patch_file}", check=False)
+                self._shim_namespace_for_susfs(restore=True)
                 self._chdir(self.work_dir)
+
+    def _needs_namespace_blkh_shim(self) -> bool:
+        """判断当前组合是否需要 fs/namespace.c 的 trace/hooks/blk.h 临时移除。
+
+        GKI 在以下子版本起把 trace/hooks/blk.h 加进了 fs/namespace.c：
+        android14-6.1 >= 157、android13-5.15 >= 197。LTS(X) 按最新处理。"""
+        av, kv = self.config.android_version, self.config.kernel_version
+        sub = self.config.get_sub_level_int()
+        if sub is None:  # X (LTS)
+            sub = 10 ** 9
+        return ((av == "android14" and kv == "6.1" and sub >= 157) or
+                (av == "android13" and kv == "5.15" and sub >= 197))
+
+    def _shim_namespace_for_susfs(self, restore: bool):
+        """围绕 SUSFS 补丁应用，临时移除/恢复 fs/namespace.c 的 trace/hooks/blk.h include。"""
+        if not self._needs_namespace_blkh_shim():
+            return
+        namespace_c = self.work_dir / "common/fs/namespace.c"
+        if not namespace_c.exists():
+            return
+        if restore:
+            with open(namespace_c, "r") as f:
+                content = f.read()
+            if "#include <trace/hooks/blk.h>" not in content:
+                logger.info("恢复 fs/namespace.c 的 #include <trace/hooks/blk.h>")
+                self._run_cmd(
+                    r"""sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c""",
+                    check=False)
+        else:
+            logger.info("临时移除 fs/namespace.c 的 #include <trace/hooks/blk.h> 以适配 SUSFS 补丁")
+            self._run_cmd(
+                r"sed -i '/^#include <trace\/hooks\/blk.h>$/d' fs/namespace.c", check=False)
 
     def apply_sukisu_patches(self):
         logger.info("=== 应用 SukiSU 补丁 ===")
@@ -578,7 +617,11 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
                 result = self._run_cmd("LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC=\"/usr/bin/ccache clang\"", check=False)
             else:
                 logger.info("使用 Bazel 构建方式...")
-                result = self._run_cmd("tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast --lto=thin //common:kernel_aarch64_dist", check=False)
+                # 本机构建：不要硬编码 GitHub Actions 的 /home/runner 路径。
+                # 可用 BAZEL_DISK_CACHE 覆盖，默认放在当前用户 home 下。
+                disk_cache = os.environ.get("BAZEL_DISK_CACHE") or str(Path.home() / ".cache/bazel")
+                os.makedirs(disk_cache, exist_ok=True)
+                result = self._run_cmd(f"tools/bazel build --disk_cache={disk_cache} --config=fast --lto=thin //common:kernel_aarch64_dist", check=False)
 
             if result.returncode == 0:
                 logger.info("=== 内核编译成功 ===")
@@ -662,7 +705,12 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
             if has_ramdisk:
                 cmd += f" --ramdisk out/ramdisk --os_version 12.0.0 --os_patch_level {self.config.os_patch_level}"
             self._run_cmd(cmd, check=False)
-            self._run_cmd(f"$AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image {output_file} --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH", check=False)
+            # 仅在提供了签名密钥时才做 AVB 签名；本机构建通常没有该密钥，
+            # 跳过签名不影响 AnyKernel3 刷机包(主要产物)的生成。
+            if self.env.get("BOOT_SIGN_KEY_PATH") and Path(self.env["BOOT_SIGN_KEY_PATH"]).exists():
+                self._run_cmd(f"$AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image {output_file} --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH", check=False)
+            else:
+                logger.info(f"未设置 BOOT_SIGN_KEY_PATH，跳过 {output_file} 的 AVB 签名")
             dest = self.work_dir / f"{self.config.android_version}-{self.config.kernel_version}.{self.config.sub_level}-{self.config.os_patch_level}-{output_file}"
             self._run_cmd(f"cp {output_file} {dest}", check=False)
             artifacts.append(str(dest))
