@@ -373,19 +373,56 @@ CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
         if not task_mmu.exists():
             return
 
-        fb = f"{self.config.android_version}-{self.config.kernel_version}"
+        # 读取文件内容
         with open(task_mmu, "r") as f:
             content = f.read()
 
+        # ===== 修复 VMA_PAD_START 未定义 =====
+        if "VMA_PAD_START" in content and "#define VMA_PAD_START" not in content:
+            logger.info("检测到 VMA_PAD_START 未定义，正在添加宏定义...")
+            # 在 #include <linux/pkeys.h> 之后添加定义
+            lines = content.split('\n')
+            new_lines = []
+            inserted = False
+            for line in lines:
+                new_lines.append(line)
+                if not inserted and line.strip().startswith('#include <linux/pkeys.h>'):
+                    new_lines.append('')
+                    new_lines.append('// VMA_PAD_START fix for SUSFS')
+                    new_lines.append('#ifndef VMA_PAD_START')
+                    new_lines.append('#define VMA_PAD_START(vma) ((vma)->vm_end)')
+                    new_lines.append('#endif')
+                    inserted = True
+            if inserted:
+                content = '\n'.join(new_lines)
+                logger.info("已添加 VMA_PAD_START 宏定义")
+
+        # ===== 修复 dentry 未初始化（如果还存在） =====
+        if "struct dentry *dentry;" in content:
+            content = content.replace("struct dentry *dentry;", "struct dentry *dentry = NULL;")
+            logger.info("已修复 dentry 未初始化问题")
+
+        # ===== 写入修改 =====
+        with open(task_mmu, "w") as f:
+            f.write(content)
+
+        # ===== 原有的修复逻辑 =====
+        fb = f"{self.config.android_version}-{self.config.kernel_version}"
+        
         if fb == "android15-6.6" and "unsigned int nr_subpages" not in content:
             self._fix_base_c_header()
         elif fb == "android14-6.1" and "if (!vma_pages(vma))" not in content:
             self._fix_base_c_header()
+            # 重新读取内容，因为可能已被修改
+            with open(task_mmu, "r") as f:
+                content = f.read()
             if "goto show_pad;" in content:
                 content = content.replace("goto show_pad;", "return 0;")
                 with open(task_mmu, "w") as f:
                     f.write(content)
         elif fb in ["android12-5.10", "android13-5.10", "android13-5.15"] and "if (!vma_pages(vma))" not in content:
+            with open(task_mmu, "r") as f:
+                content = f.read()
             if "goto show_pad;" in content:
                 content = content.replace("goto show_pad;", "return 0;")
                 with open(task_mmu, "w") as f:
